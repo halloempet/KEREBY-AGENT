@@ -24,6 +24,9 @@ jobs:
               {"navn": "City Apartment", "url": "https://cityapartment.dk/apartment-rentals-copenhagen/",
                "base": "https://cityapartment.dk",
                "pattern": r'(?:https://cityapartment\.dk)?/cityapartments/[a-z0-9-]+/', "max": 9700},
+              {"navn": "CEJ", "url": "https://udlejning.cej.dk/find-bolig/overblik?collection=residences&minRooms=2&monthlyPrice=0-9800&p=sj%C3%A6lland",
+               "base": "https://udlejning.cej.dk",
+               "pattern": r'(?:https://udlejning\.cej\.dk)?/boliger/[a-f0-9]{32}', "max": None},
           ]
           def get(url):
               req = urllib.request.Request(url, headers=UA)
@@ -43,8 +46,8 @@ jobs:
                   continue
               found = re.findall(s["pattern"], html)
               links = {l if l.startswith("http") else s["base"] + l for l in found}
+              print(s["navn"], "- boliger fundet:", len(links))
               if not links:
-                  print("Ingen boliger fundet hos", s["navn"])
                   continue
               seeded = any(l.startswith(s["base"]) for l in seen)
               if seeded:
