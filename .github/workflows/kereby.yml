@@ -10,30 +10,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Tjek Kereby
+      - name: Tjek boligsider
         env:
           NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
         run: |
           python3 - <<'EOF'
-          import os, re, json, sys, urllib.request, urllib.parse
+          import os, re, json, urllib.request, urllib.parse
           UA = {"User-Agent": "Mozilla/5.0"}
-          req = urllib.request.Request("https://kereby.dk/bolig/", headers=UA)
-          html = urllib.request.urlopen(req, timeout=30).read().decode()
-          found = re.findall(r'(?:https://kereby\.dk)?/bolig/[a-z0-9-]+/', html)
-          links = {l if l.startswith("http") else "https://kereby.dk" + l for l in found}
-          if not links:
-              sys.exit("Ingen boliger fundet")
-          first = not os.path.exists("seen.json")
-          seen = set() if first else set(json.load(open("seen.json")))
+          SITES = [
+              {"navn": "Kereby", "url": "https://kereby.dk/bolig/",
+               "base": "https://kereby.dk",
+               "pattern": r'(?:https://kereby\.dk)?/bolig/[a-z0-9-]+/', "max": None},
+              {"navn": "City Apartment", "url": "https://cityapartment.dk/apartment-rentals-copenhagen/",
+               "base": "https://cityapartment.dk",
+               "pattern": r'(?:https://cityapartment\.dk)?/cityapartments/[a-z0-9-]+/', "max": 9700},
+          ]
+          def get(url):
+              req = urllib.request.Request(url, headers=UA)
+              return urllib.request.urlopen(req, timeout=30).read().decode()
           def notify(msg):
               url = os.environ["NOTIFY_URL"].strip() + "&body=" + urllib.parse.quote(msg)
               urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30)
-          if first:
-              notify("Kereby-overvågning er sat op")
-          else:
-              for l in sorted(links - seen):
-                  notify("Ny bolig på Kereby: " + l)
-          json.dump(sorted(seen | links), open("seen.json", "w"))
+          def price(url):
+              m = re.search(r'(\d[\d.]*)\s*(?:<[^>]*>\s*)*DKK\s*/\s*md', get(url))
+              return int(m.group(1).replace(".", "")) if m else None
+          seen = set(json.load(open("seen.json"))) if os.path.exists("seen.json") else set()
+          for s in SITES:
+              try:
+                  html = get(s["url"])
+              except Exception as e:
+                  print("Fejl ved", s["navn"], e)
+                  continue
+              found = re.findall(s["pattern"], html)
+              links = {l if l.startswith("http") else s["base"] + l for l in found}
+              if not links:
+                  print("Ingen boliger fundet hos", s["navn"])
+                  continue
+              seeded = any(l.startswith(s["base"]) for l in seen)
+              if seeded:
+                  for l in sorted(links - seen):
+                      p = None
+                      if s["max"]:
+                          try:
+                              p = price(l)
+                          except Exception as e:
+                              print("Prisfejl", e)
+                          if p is not None and p > s["max"]:
+                              continue
+                      tekst = "Ny bolig hos " + s["navn"]
+                      if p:
+                          tekst += " (" + str(p) + " kr./md.)"
+                      notify(tekst + ": " + l)
+              seen |= links
+          json.dump(sorted(seen), open("seen.json", "w"))
           EOF
       - name: Gem
         run: |
